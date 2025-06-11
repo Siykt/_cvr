@@ -20,7 +20,9 @@ jobs:
         run: |
           git config user.name "GitHub Actions - Sync Upstream"
           git config user.email "actions@users.noreply.github.com"
+          git switch main
           git merge upstream/main --allow-unrelated-histories
+          git switch dev
           git merge upstream/dev --allow-unrelated-histories
 
       - name: Push origin
