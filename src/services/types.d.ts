@@ -31,9 +31,12 @@ interface IConfigData {
   "socks-port": number;
   "tproxy-port": number;
   "external-controller": string;
+  "external-controller-cors": {
+    "allow-private-network": boolean;
+    "allow-origins": string[];
+  };
   secret: string;
   "unified-delay": boolean;
-  "tcp-concurrent": boolean;
   tun: {
     stack: string;
     device: string;
@@ -780,6 +783,9 @@ interface IVergeConfig {
     success_color?: string;
     font_family?: string;
     css_injection?: string;
+    background_image?: string;
+    background_blend_mode?: string;
+    background_opacity?: number;
   };
   auto_close_connection?: boolean;
   auto_check_update?: boolean;
@@ -793,6 +799,7 @@ interface IVergeConfig {
   webdav_username?: string;
   webdav_password?: string;
   home_cards?: Record<string, boolean>;
+  enable_hover_jump_navigator?: boolean;
 }
 
 interface IWebDavFile {

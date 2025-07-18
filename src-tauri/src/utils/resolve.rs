@@ -1,8 +1,10 @@
+#[cfg(target_os = "macos")]
+use crate::AppHandleManager;
 use crate::{
     config::{Config, IVerge, PrfItem},
     core::*,
     logging, logging_error,
-    module::lightweight,
+    module::lightweight::{self, auto_lightweight_mode_init},
     process::AsyncHandler,
     utils::{init, logging::Type, server},
     wrap_err,
@@ -11,6 +13,7 @@ use anyhow::{bail, Result};
 use once_cell::sync::OnceCell;
 use parking_lot::{Mutex, RwLock};
 use percent_encoding::percent_decode_str;
+use scopeguard;
 use serde_yaml::Mapping;
 use std::{
     sync::Arc,
@@ -49,14 +52,12 @@ pub enum UiReadyStage {
 #[derive(Debug)]
 struct UiReadyState {
     stage: RwLock<UiReadyStage>,
-    last_update: RwLock<Instant>,
 }
 
 impl Default for UiReadyState {
     fn default() -> Self {
         Self {
             stage: RwLock::new(UiReadyStage::NotStarted),
-            last_update: RwLock::new(Instant::now()),
         }
     }
 }
@@ -80,20 +81,8 @@ fn get_ui_ready_state() -> &'static Arc<UiReadyState> {
 pub fn update_ui_ready_stage(stage: UiReadyStage) {
     let state = get_ui_ready_state();
     let mut stage_lock = state.stage.write();
-    let mut time_lock = state.last_update.write();
 
     *stage_lock = stage;
-    *time_lock = Instant::now();
-
-    logging!(
-        info,
-        Type::Window,
-        true,
-        "UI准备阶段更新: {:?}, 耗时: {:?}ms",
-        stage,
-        time_lock.elapsed().as_millis()
-    );
-
     // 如果是最终阶段，标记UI完全就绪
     if stage == UiReadyStage::Ready {
         mark_ui_ready();
@@ -116,9 +105,7 @@ pub fn reset_ui_ready() {
     {
         let state = get_ui_ready_state();
         let mut stage = state.stage.write();
-        let mut time = state.last_update.write();
         *stage = UiReadyStage::NotStarted;
-        *time = Instant::now();
     }
     logging!(info, Type::Window, true, "UI就绪状态已重置");
 }
@@ -131,10 +118,10 @@ pub async fn find_unused_port() -> Result<u16> {
         }
         Err(_) => {
             let port = Config::verge()
-                .latest()
+                .latest_ref()
                 .verge_mixed_port
-                .unwrap_or(Config::clash().data().get_mixed_port());
-            log::warn!(target: "app", "use default port: {}", port);
+                .unwrap_or(Config::clash().latest_ref().get_mixed_port());
+            log::warn!(target: "app", "use default port: {port}");
             Ok(port)
         }
     }
@@ -142,7 +129,8 @@ pub async fn find_unused_port() -> Result<u16> {
 
 /// 异步方式处理启动后的额外任务
 pub async fn resolve_setup_async(app_handle: &AppHandle) {
-    logging!(info, Type::Setup, true, "执行异步设置任务...");
+    let start_time = std::time::Instant::now();
+    logging!(info, Type::Setup, true, "开始执行异步设置任务...");
 
     if VERSION.get().is_none() {
         let version = app_handle.package_info().version.to_string();
@@ -168,6 +156,15 @@ pub async fn resolve_setup_async(app_handle: &AppHandle) {
 
     logging!(trace, Type::Config, true, "初始化配置...");
     logging_error!(Type::Config, true, Config::init_config().await);
+
+    // 启动时清理冗余的 Profile 文件
+    logging!(info, Type::Setup, true, "清理冗余的Profile文件...");
+    let profiles = Config::profiles();
+    if let Err(e) = profiles.latest_ref().auto_cleanup() {
+        logging!(warn, Type::Setup, true, "启动时清理Profile文件失败: {}", e);
+    } else {
+        logging!(info, Type::Setup, true, "启动时Profile文件清理完成");
+    }
 
     logging!(trace, Type::Core, true, "启动核心管理器...");
     logging_error!(Type::Core, true, CoreManager::global().init().await);
@@ -207,25 +204,47 @@ pub async fn resolve_setup_async(app_handle: &AppHandle) {
     );
 
     // 创建窗口
-    let is_silent_start = { Config::verge().data().enable_silent_start }.unwrap_or(false);
+    let is_silent_start = { Config::verge().latest_ref().enable_silent_start }.unwrap_or(false);
+    #[cfg(target_os = "macos")]
+    {
+        if is_silent_start {
+            use crate::AppHandleManager;
+
+            AppHandleManager::global().set_activation_policy_accessory();
+        }
+    }
     create_window(!is_silent_start);
 
     // 初始化定时器
     logging_error!(Type::System, true, timer::Timer::global().init());
 
     // 自动进入轻量模式
-    let enable_auto_light_weight_mode =
-        { Config::verge().data().enable_auto_light_weight_mode }.unwrap_or(false);
-    if enable_auto_light_weight_mode && !is_silent_start {
-        lightweight::enable_auto_light_weight_mode();
-    }
+    auto_lightweight_mode_init();
 
     logging_error!(Type::Tray, true, tray::Tray::global().update_part());
 
     logging!(trace, Type::System, true, "初始化热键...");
     logging_error!(Type::System, true, hotkey::Hotkey::global().init());
 
-    logging!(info, Type::Setup, true, "异步设置任务完成");
+    let elapsed = start_time.elapsed();
+    logging!(
+        info,
+        Type::Setup,
+        true,
+        "异步设置任务完成，耗时: {:?}",
+        elapsed
+    );
+
+    // 如果初始化时间过长，记录警告
+    if elapsed.as_secs() > 10 {
+        logging!(
+            warn,
+            Type::Setup,
+            true,
+            "异步设置任务耗时较长({:?})",
+            elapsed
+        );
+    }
 }
 
 /// reset system proxy (异步)
@@ -258,12 +277,28 @@ pub fn create_window(is_show: bool) -> bool {
         is_show
     );
 
+    if !is_show {
+        logging!(info, Type::Window, true, "静默模式启动时不创建窗口");
+        lightweight::set_lightweight_mode(true);
+        handle::Handle::notify_startup_completed();
+        return false;
+    }
+
     if let Some(app_handle) = handle::Handle::global().app_handle() {
         if let Some(window) = app_handle.get_webview_window("main") {
             logging!(info, Type::Window, true, "主窗口已存在，将显示现有窗口");
             if is_show {
+                if window.is_minimized().unwrap_or(false) {
+                    logging!(info, Type::Window, true, "窗口已最小化，正在取消最小化");
+                    let _ = window.unminimize();
+                }
                 let _ = window.show();
                 let _ = window.set_focus();
+
+                #[cfg(target_os = "macos")]
+                {
+                    AppHandleManager::global().set_activation_policy_regular();
+                }
             }
             return true;
         }
@@ -288,6 +323,12 @@ pub fn create_window(is_show: bool) -> bool {
 
     *creating = (true, Instant::now());
 
+    // ScopeGuard 确保创建状态重置，防止 webview 卡死
+    let _guard = scopeguard::guard(creating, |mut creating_guard| {
+        *creating_guard = (false, Instant::now());
+        logging!(debug, Type::Window, true, "[ScopeGuard] 窗口创建状态已重置");
+    });
+
     match tauri::WebviewWindowBuilder::new(
         &handle::Handle::global().app_handle().unwrap(),
         "main", /* the unique window label */
@@ -299,13 +340,76 @@ pub fn create_window(is_show: bool) -> bool {
     .fullscreen(false)
     .inner_size(DEFAULT_WIDTH as f64, DEFAULT_HEIGHT as f64)
     .min_inner_size(520.0, 520.0)
-    .visible(false)
+    .visible(true) // 立即显示窗口，避免用户等待
+    .initialization_script(
+        r#"
+        console.log('[Tauri] 窗口初始化脚本开始执行');
+
+        function createLoadingOverlay() {
+
+            if (document.getElementById('initial-loading-overlay')) {
+                console.log('[Tauri] 加载指示器已存在');
+                return;
+            }
+
+            console.log('[Tauri] 创建加载指示器');
+            const loadingDiv = document.createElement('div');
+            loadingDiv.id = 'initial-loading-overlay';
+            loadingDiv.innerHTML = `
+                <div style="
+                    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+                    background: var(--bg-color, #f5f5f5); color: var(--text-color, #333);
+                    display: flex; flex-direction: column; align-items: center;
+                    justify-content: center; z-index: 9999;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    transition: opacity 0.3s ease;
+                ">
+                    <div style="margin-bottom: 20px;">
+                        <div style="
+                            width: 40px; height: 40px; border: 3px solid #e3e3e3;
+                            border-top: 3px solid #3498db; border-radius: 50%;
+                            animation: spin 1s linear infinite;
+                        "></div>
+                    </div>
+                    <div style="font-size: 14px; opacity: 0.7;">Loading Clash Verge...</div>
+                </div>
+                <style>
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                    @media (prefers-color-scheme: dark) {
+                        :root { --bg-color: #1a1a1a; --text-color: #ffffff; }
+                    }
+                </style>
+            `;
+
+            if (document.body) {
+                document.body.appendChild(loadingDiv);
+            } else {
+                document.addEventListener('DOMContentLoaded', () => {
+                    if (document.body && !document.getElementById('initial-loading-overlay')) {
+                        document.body.appendChild(loadingDiv);
+                    }
+                });
+            }
+        }
+
+        createLoadingOverlay();
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', createLoadingOverlay);
+        } else {
+            createLoadingOverlay();
+        }
+
+        console.log('[Tauri] 窗口初始化脚本执行完成');
+    "#,
+    )
     .build()
     {
         Ok(newly_created_window) => {
             logging!(debug, Type::Window, true, "主窗口实例创建成功");
-
-            *creating = (false, Instant::now());
 
             update_ui_ready_stage(UiReadyStage::NotStarted);
 
@@ -318,84 +422,115 @@ pub fn create_window(is_show: bool) -> bool {
                     "异步窗口任务开始 (启动已标记完成)"
                 );
 
+                // 先运行轻量模式检测
+                lightweight::run_once_auto_lightweight();
+
+                // 发送启动完成事件，触发前端开始加载
+                logging!(
+                    debug,
+                    Type::Window,
+                    true,
+                    "发送 verge://startup-completed 事件"
+                );
+                handle::Handle::notify_startup_completed();
+
                 if is_show {
                     let window_clone = newly_created_window.clone();
 
-                    // Attempt to show and focus the window first.
+                    // 立即显示窗口
                     let _ = window_clone.show();
                     let _ = window_clone.set_focus();
-                    logging!(debug, Type::Window, true, "窗口已尝试显示和聚焦");
-
-                    tokio::time::sleep(Duration::from_millis(100)).await; // Crucial delay
-
-                    logging!(
-                        debug,
-                        Type::Window,
-                        true,
-                        "延时后，尝试发送 verge://startup-completed 事件"
-                    );
-                    handle::Handle::notify_startup_completed();
+                    logging!(info, Type::Window, true, "窗口已立即显示");
+                    #[cfg(target_os = "macos")]
+                    {
+                        AppHandleManager::global().set_activation_policy_regular();
+                    }
 
                     let timeout_seconds = if crate::module::lightweight::is_in_lightweight_mode() {
-                        2
+                        3
                     } else {
-                        5
+                        8
                     };
 
                     logging!(
                         info,
                         Type::Window,
                         true,
-                        "等待UI就绪 (最多{}秒)...",
+                        "开始监控UI加载状态 (最多{}秒)...",
                         timeout_seconds
                     );
 
-                    let wait_result =
-                        tokio::time::timeout(Duration::from_secs(timeout_seconds), async {
-                            while !*get_ui_ready().read() {
-                                tokio::time::sleep(Duration::from_millis(100)).await;
-                            }
-                        })
-                        .await;
+                    // 异步监控UI状态，不影响窗口显示
+                    tokio::spawn(async move {
+                        let wait_result =
+                            tokio::time::timeout(Duration::from_secs(timeout_seconds), async {
+                                let mut check_count = 0;
+                                while !*get_ui_ready().read() {
+                                    tokio::time::sleep(Duration::from_millis(100)).await;
+                                    check_count += 1;
 
-                    match wait_result {
-                        Ok(_) => {
-                            logging!(info, Type::Window, true, "UI就绪");
+                                    // 每2秒记录一次等待状态
+                                    if check_count % 20 == 0 {
+                                        logging!(
+                                            debug,
+                                            Type::Window,
+                                            true,
+                                            "UI加载状态检查... ({}秒)",
+                                            check_count / 10
+                                        );
+                                    }
+                                }
+                            })
+                            .await;
+
+                        match wait_result {
+                            Ok(_) => {
+                                logging!(info, Type::Window, true, "UI已完全加载就绪");
+                                // 移除初始加载指示器
+                                if let Some(window) = handle::Handle::global().get_window() {
+                                    let _ = window.eval(r#"
+                                        const overlay = document.getElementById('initial-loading-overlay');
+                                        if (overlay) {
+                                            overlay.style.opacity = '0';
+                                            setTimeout(() => overlay.remove(), 300);
+                                        }
+                                    "#);
+                                }
+                            }
+                            Err(_) => {
+                                logging!(
+                                    warn,
+                                    Type::Window,
+                                    true,
+                                    "UI加载监控超时({}秒)，但窗口已正常显示",
+                                    timeout_seconds
+                                );
+                                *get_ui_ready().write() = true;
+                            }
                         }
-                        Err(_) => {
-                            logging!(
-                                warn,
-                                Type::Window,
-                                true,
-                                "等待UI就绪超时({}秒)，强制标记就绪",
-                                timeout_seconds
-                            );
-                            *get_ui_ready().write() = true;
-                        }
-                    }
+                    });
+
                     logging!(info, Type::Window, true, "窗口显示流程完成");
                 } else {
                     logging!(
                         debug,
                         Type::Window,
                         true,
-                        "is_show为false，窗口保持隐藏。尝试发送启动事件。"
+                        "is_show为false，窗口保持隐藏状态"
                     );
-                    handle::Handle::notify_startup_completed();
                 }
             });
             true
         }
         Err(e) => {
             logging!(error, Type::Window, true, "主窗口构建失败: {}", e);
-            *creating = (false, Instant::now()); // Reset the creating state if window creation failed
             false
         }
     }
 }
 
 pub async fn resolve_scheme(param: String) -> Result<()> {
-    log::info!(target:"app", "received deep link: {}", param);
+    log::info!(target:"app", "received deep link: {param}");
 
     let param_str = if param.starts_with("[") && param.len() > 4 {
         param
@@ -433,13 +568,13 @@ pub async fn resolve_scheme(param: String) -> Result<()> {
 
         match url_param {
             Some(url) => {
-                log::info!(target:"app", "decoded subscription url: {}", url);
+                log::info!(target:"app", "decoded subscription url: {url}");
 
                 create_window(false);
                 match PrfItem::from_url(url.as_ref(), name, None, None).await {
                     Ok(item) => {
                         let uid = item.uid.clone().unwrap();
-                        let _ = wrap_err!(Config::profiles().data().append_item(item));
+                        let _ = wrap_err!(Config::profiles().data_mut().append_item(item));
                         handle::Handle::notice_message("import_sub_url::ok", uid);
                     }
                     Err(e) => {
@@ -457,12 +592,15 @@ pub async fn resolve_scheme(param: String) -> Result<()> {
 async fn resolve_random_port_config() -> Result<()> {
     let verge_config = Config::verge();
     let clash_config = Config::clash();
-    let enable_random_port = verge_config.latest().enable_random_port.unwrap_or(false);
+    let enable_random_port = verge_config
+        .latest_ref()
+        .enable_random_port
+        .unwrap_or(false);
 
     let default_port = verge_config
-        .latest()
+        .latest_ref()
         .verge_mixed_port
-        .unwrap_or(clash_config.data().get_mixed_port());
+        .unwrap_or(clash_config.latest_ref().get_mixed_port());
 
     let port = if enable_random_port {
         find_unused_port().await.unwrap_or(default_port)
@@ -474,7 +612,7 @@ async fn resolve_random_port_config() -> Result<()> {
 
     tokio::task::spawn_blocking(move || {
         let verge_config_accessor = Config::verge();
-        let mut verge_data = verge_config_accessor.data();
+        let mut verge_data = verge_config_accessor.data_mut();
         verge_data.patch_config(IVerge {
             verge_mixed_port: Some(port_to_save),
             ..IVerge::default()
@@ -485,7 +623,7 @@ async fn resolve_random_port_config() -> Result<()> {
 
     tokio::task::spawn_blocking(move || {
         let clash_config_accessor = Config::clash(); // Extend lifetime of the accessor
-        let mut clash_data = clash_config_accessor.data(); // Access within blocking task, made mutable
+        let mut clash_data = clash_config_accessor.data_mut(); // Access within blocking task, made mutable
         let mut mapping = Mapping::new();
         mapping.insert("mixed-port".into(), port_to_save.into());
         clash_data.patch_config(mapping);

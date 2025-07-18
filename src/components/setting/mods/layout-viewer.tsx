@@ -12,6 +12,7 @@ import {
 } from "@mui/material";
 import { useVerge } from "@/hooks/use-verge";
 import { BaseDialog, DialogRef, Switch } from "@/components/base";
+import { TooltipIcon } from "@/components/base/base-tooltip-icon";
 import { GuardState } from "./guard-state";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
@@ -88,7 +89,7 @@ export const LayoutViewer = forwardRef<DialogRef>((props, ref) => {
 
   const onSwitchFormat = (_e: any, value: boolean) => value;
   const onError = (err: any) => {
-    showNotice('error', err.message || err.toString());
+    showNotice("error", err.message || err.toString());
   };
   const onChangeData = (patch: Partial<IVergeConfig>) => {
     mutateVerge({ ...verge, ...patch }, false);
@@ -148,6 +149,30 @@ export const LayoutViewer = forwardRef<DialogRef>((props, ref) => {
         </Item>
 
         <Item>
+          <ListItemText
+            primary={
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                <span>{t("Hover Jump Navigator")}</span>
+                <TooltipIcon
+                  title={t("Hover Jump Navigator Info")}
+                  sx={{ opacity: "0.7" }}
+                />
+              </Box>
+            }
+          />
+          <GuardState
+            value={verge?.enable_hover_jump_navigator ?? true}
+            valueProps="checked"
+            onCatch={onError}
+            onFormat={onSwitchFormat}
+            onChange={(e) => onChangeData({ enable_hover_jump_navigator: e })}
+            onGuard={(e) => patchVerge({ enable_hover_jump_navigator: e })}
+          >
+            <Switch edge="end" />
+          </GuardState>
+        </Item>
+
+        <Item>
           <ListItemText primary={t("Nav Icon")} />
           <GuardState
             value={verge?.menu_icon ?? "monochrome"}
@@ -184,7 +209,7 @@ export const LayoutViewer = forwardRef<DialogRef>((props, ref) => {
             </GuardState>
           </Item>
         )}
-        {OS === "macos" && (
+        {/* {OS === "macos" && (
           <Item>
             <ListItemText primary={t("Enable Tray Speed")} />
             <GuardState
@@ -198,7 +223,7 @@ export const LayoutViewer = forwardRef<DialogRef>((props, ref) => {
               <Switch edge="end" />
             </GuardState>
           </Item>
-        )}
+        )} */}
         {OS === "macos" && (
           <Item>
             <ListItemText primary={t("Enable Tray Icon")} />

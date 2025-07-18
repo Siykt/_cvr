@@ -27,7 +27,7 @@ export const MiscViewer = forwardRef<DialogRef>((props, ref) => {
     enableBuiltinEnhanced: true,
     proxyLayoutColumn: 6,
     defaultLatencyTest: "",
-    autoLogClean: 0,
+    autoLogClean: 2,
     defaultLatencyTimeout: 10000,
   });
 
@@ -62,7 +62,7 @@ export const MiscViewer = forwardRef<DialogRef>((props, ref) => {
       });
       setOpen(false);
     } catch (err: any) {
-      showNotice('error', err.toString());
+      showNotice("error", err.toString());
     }
   });
 
@@ -246,7 +246,7 @@ export const MiscViewer = forwardRef<DialogRef>((props, ref) => {
                 endAdornment: (
                   <InputAdornment position="end">{t("millis")}</InputAdornment>
                 ),
-              }
+              },
             }}
           />
         </ListItem>

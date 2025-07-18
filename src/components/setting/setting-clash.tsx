@@ -7,10 +7,7 @@ import { updateGeoData } from "@/services/api";
 import { invoke_uwp_tool } from "@/services/cmds";
 import { showNotice } from "@/services/noticeService";
 import getSystem from "@/utils/get-system";
-import {
-  LanRounded,
-  SettingsRounded
-} from "@mui/icons-material";
+import { LanRounded, SettingsRounded } from "@mui/icons-material";
 import { MenuItem, Select, TextField, Typography } from "@mui/material";
 import { invoke } from "@tauri-apps/api/core";
 import { useLockFn } from "ahooks";
@@ -24,6 +21,7 @@ import { GuardState } from "./mods/guard-state";
 import { NetworkInterfaceViewer } from "./mods/network-interface-viewer";
 import { SettingItem, SettingList } from "./mods/setting-comp";
 import { WebUIViewer } from "./mods/web-ui-viewer";
+import { HeaderConfiguration } from "./mods/external-controller-cors";
 
 const isWIN = getSystem() === "windows";
 
@@ -39,7 +37,6 @@ const SettingClash = ({ onError }: Props) => {
 
   const {
     ipv6,
-    "tcp-concurrent": tcp,
     "allow-lan": allowLan,
     "log-level": logLevel,
     "unified-delay": unifiedDelay,
@@ -61,6 +58,7 @@ const SettingClash = ({ onError }: Props) => {
   const coreRef = useRef<DialogRef>(null);
   const networkRef = useRef<DialogRef>(null);
   const dnsRef = useRef<DialogRef>(null);
+  const corsRef = useRef<DialogRef>(null);
 
   const onSwitchFormat = (_e: any, value: boolean) => value;
   const onChangeData = (patch: Partial<IConfigData>) => {
@@ -72,9 +70,9 @@ const SettingClash = ({ onError }: Props) => {
   const onUpdateGeo = async () => {
     try {
       await updateGeoData();
-      showNotice('success', t("GeoData Updated"));
+      showNotice("success", t("GeoData Updated"));
     } catch (err: any) {
-      showNotice('error', err?.response.data.message || err.toString());
+      showNotice("error", err?.response.data.message || err.toString());
     }
   };
 
@@ -91,7 +89,7 @@ const SettingClash = ({ onError }: Props) => {
     } catch (err: any) {
       setDnsSettingsEnabled(!enable);
       localStorage.setItem("dns_settings_enabled", String(!enable));
-      showNotice('error', err.message || err.toString());
+      showNotice("error", err.message || err.toString());
       await patchVerge({ enable_dns_settings: !enable }).catch(() => {});
       throw err;
     }
@@ -105,6 +103,7 @@ const SettingClash = ({ onError }: Props) => {
       <ClashCoreViewer ref={coreRef} />
       <NetworkInterfaceViewer ref={networkRef} />
       <DnsViewer ref={dnsRef} />
+      <HeaderConfiguration ref={corsRef} />
 
       <SettingItem
         label={t("Allow Lan")}
@@ -182,27 +181,6 @@ const SettingClash = ({ onError }: Props) => {
       </SettingItem>
 
       <SettingItem
-        label={t("TCP Concurrency")}
-        extra={
-          <TooltipIcon
-            title={t("TCP ConcurrencyWhen accessing a web page, DNS resolution generally results in multiple IP addresses.")}
-            sx={{ opacity: "0.7" }}
-          />
-        }
-      >
-        <GuardState
-          value={tcp ?? false}
-          valueProps="checked"
-          onCatch={onError}
-          onFormat={onSwitchFormat}
-          onChange={(e) => onChangeData({ "tcp-concurrent": e })}
-          onGuard={(e) => patchClash({ "tcp-concurrent": e })}
-        >
-          <Switch edge="end" />
-        </GuardState>
-      </SettingItem>
-
-      <SettingItem
         label={t("Log Level")}
         extra={
           <TooltipIcon title={t("Log Level Info")} sx={{ opacity: "0.7" }} />
@@ -225,9 +203,7 @@ const SettingClash = ({ onError }: Props) => {
         </GuardState>
       </SettingItem>
 
-      <SettingItem
-        label={t("Port Config")}
-      >
+      <SettingItem label={t("Port Config")}>
         <TextField
           autoComplete="new-password"
           disabled={false}
@@ -242,16 +218,20 @@ const SettingClash = ({ onError }: Props) => {
       </SettingItem>
 
       <SettingItem
-        onClick={() => ctrlRef.current?.open()}
-        label={
-          <>
-            {t("External")}
-            <TooltipIcon
-              title={t("Enable one-click random API port and key. Click to randomize the port and key")}
-              sx={{ opacity: "0.7" }}
-            />
-          </>
+        label={<>{t("External")}</>}
+        extra={
+          <TooltipIcon
+            title={t("External Cors Settings")}
+            icon={SettingsRounded}
+            onClick={(e) => {
+              e.stopPropagation();
+              corsRef.current?.open();
+            }}
+          />
         }
+        onClick={() => {
+          ctrlRef.current?.open();
+        }}
       />
 
       <SettingItem onClick={() => webRef.current?.open()} label={t("Web UI")} />

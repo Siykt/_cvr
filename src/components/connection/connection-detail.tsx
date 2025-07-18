@@ -86,9 +86,7 @@ const InnerConnectionDetail = ({ data, onClose }: InnerProps) => {
     { label: t("Rule"), value: rule },
     {
       label: t("Process"),
-      value: `${metadata.process}${
-        metadata.processPath ? `(${metadata.processPath})` : ""
-      }`,
+      value: `${metadata.process}${metadata.processPath ? `(${metadata.processPath})` : ""}`,
     },
     { label: t("Time"), value: dayjs(data.start).fromNow() },
     {
@@ -107,7 +105,14 @@ const InnerConnectionDetail = ({ data, onClose }: InnerProps) => {
       {information.map((each) => (
         <div key={each.label}>
           <b>{each.label}</b>
-          <span style={{ wordBreak: "break-all", color: theme.palette.text.primary }}>: {each.value}</span>
+          <span
+            style={{
+              wordBreak: "break-all",
+              color: theme.palette.text.primary,
+            }}
+          >
+            : {each.value}
+          </span>
         </div>
       ))}
 

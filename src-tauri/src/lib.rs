@@ -1,11 +1,11 @@
 mod cmd;
-mod config;
+pub mod config;
 mod core;
 mod enhance;
-mod error;
 mod feat;
 mod module;
 mod process;
+mod state;
 mod utils;
 use crate::{
     core::hotkey,
@@ -13,10 +13,12 @@ use crate::{
     utils::{resolve, resolve::resolve_scheme, server},
 };
 use config::Config;
-use std::sync::{Mutex, Once};
+use parking_lot::Mutex;
+use std::sync::Once;
 use tauri::AppHandle;
 #[cfg(target_os = "macos")]
 use tauri::Manager;
+#[cfg(target_os = "macos")]
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_deep_link::DeepLinkExt;
 use tokio::time::{timeout, Duration};
@@ -41,14 +43,14 @@ impl AppHandleManager {
     /// Initialize the app handle manager with an app handle.
     pub fn init(&self, handle: AppHandle) {
         self.init.call_once(|| {
-            let mut app_handle = self.inner.lock().unwrap();
+            let mut app_handle = self.inner.lock();
             *app_handle = Some(handle);
         });
     }
 
     /// Get the app handle if it has been initialized.
     pub fn get(&self) -> Option<AppHandle> {
-        self.inner.lock().unwrap().clone()
+        self.inner.lock().clone()
     }
 
     /// Get the app handle, panics if it hasn't been initialized.
@@ -59,7 +61,7 @@ impl AppHandleManager {
     pub fn set_activation_policy_regular(&self) {
         #[cfg(target_os = "macos")]
         {
-            let app_handle = self.inner.lock().unwrap();
+            let app_handle = self.inner.lock();
             let app_handle = app_handle.as_ref().unwrap();
             let _ = app_handle.set_activation_policy(tauri::ActivationPolicy::Regular);
         }
@@ -68,7 +70,7 @@ impl AppHandleManager {
     pub fn set_activation_policy_accessory(&self) {
         #[cfg(target_os = "macos")]
         {
-            let app_handle = self.inner.lock().unwrap();
+            let app_handle = self.inner.lock();
             let app_handle = app_handle.as_ref().unwrap();
             let _ = app_handle.set_activation_policy(tauri::ActivationPolicy::Accessory);
         }
@@ -77,7 +79,7 @@ impl AppHandleManager {
     pub fn set_activation_policy_prohibited(&self) {
         #[cfg(target_os = "macos")]
         {
-            let app_handle = self.inner.lock().unwrap();
+            let app_handle = self.inner.lock();
             let app_handle = app_handle.as_ref().unwrap();
             let _ = app_handle.set_activation_policy(tauri::ActivationPolicy::Prohibited);
         }
@@ -90,17 +92,20 @@ pub fn run() {
 
     let _ = utils::dirs::init_portable_flag();
 
-    // 单例检测
-    let app_exists: bool = AsyncHandler::block_on(move || async move {
+    // 异步单例检测
+    AsyncHandler::spawn(move || async move {
         logging!(info, Type::Setup, true, "开始检查单例实例...");
         match timeout(Duration::from_secs(3), server::check_singleton()).await {
             Ok(result) => {
                 if result.is_err() {
                     logging!(info, Type::Setup, true, "检测到已有应用实例运行");
-                    true
+                    if let Some(app_handle) = AppHandleManager::global().get() {
+                        app_handle.exit(0);
+                    } else {
+                        std::process::exit(0);
+                    }
                 } else {
                     logging!(info, Type::Setup, true, "未检测到其他应用实例");
-                    false
                 }
             }
             Err(_) => {
@@ -110,13 +115,9 @@ pub fn run() {
                     true,
                     "单例检查超时，假定没有其他实例运行"
                 );
-                false
             }
         }
     });
-    if app_exists {
-        return;
-    }
 
     #[cfg(target_os = "linux")]
     std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
@@ -126,6 +127,7 @@ pub fn run() {
 
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_process::init())
@@ -134,6 +136,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_deep_link::init())
+        .manage(Mutex::new(state::lightweight::LightWeightState::default()))
         .setup(|app| {
             logging!(info, Type::Setup, true, "开始应用初始化...");
             let mut auto_start_plugin_builder = tauri_plugin_autostart::Builder::new();
@@ -162,6 +165,14 @@ pub fn run() {
                     }
                 });
             });
+
+            // 窗口管理
+            logging!(info, Type::Setup, true, "初始化窗口状态管理...");
+            let window_state_plugin = tauri_plugin_window_state::Builder::new()
+                .with_filename("window_state.json")
+                .with_state_flags(tauri_plugin_window_state::StateFlags::default())
+                .build();
+            let _ = app.handle().plugin(window_state_plugin);
 
             // 异步处理
             let app_handle = app.handle().clone();
@@ -253,6 +264,7 @@ pub fn run() {
             cmd::invoke_uwp_tool,
             cmd::copy_clash_env,
             cmd::get_proxies,
+            cmd::force_refresh_proxies,
             cmd::get_providers_proxies,
             cmd::save_dns_config,
             cmd::apply_dns_config,
@@ -366,7 +378,7 @@ pub fn run() {
                         if core::handle::Handle::global().is_exiting() {
                             return;
                         }
-                        println!("closing window...");
+                        log::info!(target: "app", "closing window...");
                         api.prevent_close();
                         if let Some(window) = core::handle::Handle::global().get_window() {
                             let _ = window.hide();
@@ -390,7 +402,7 @@ pub fn run() {
                         }
                         {
                             let is_enable_global_hotkey = Config::verge()
-                                .latest()
+                                .latest_ref()
                                 .enable_global_hotkey
                                 .unwrap_or(true);
                             if !is_enable_global_hotkey {
@@ -414,7 +426,7 @@ pub fn run() {
                         }
                         {
                             let is_enable_global_hotkey = Config::verge()
-                                .latest()
+                                .latest_ref()
                                 .enable_global_hotkey
                                 .unwrap_or(true);
                             if !is_enable_global_hotkey {

@@ -48,6 +48,10 @@ import MonacoEditor from "react-monaco-editor";
 import { useThemeMode } from "@/services/states";
 import { Controller, useForm } from "react-hook-form";
 import { showNotice } from "@/services/noticeService";
+import {
+  requestIdleCallback,
+  cancelIdleCallback,
+} from "foxact/request-idle-callback";
 
 interface Props {
   proxiesUid: string;
@@ -90,27 +94,27 @@ export const GroupsEditorViewer = (props: Props) => {
 
   const filteredPrependSeq = useMemo(
     () => prependSeq.filter((group) => match(group.name)),
-    [prependSeq, match]
+    [prependSeq, match],
   );
   const filteredGroupList = useMemo(
     () => groupList.filter((group) => match(group.name)),
-    [groupList, match]
+    [groupList, match],
   );
   const filteredAppendSeq = useMemo(
     () => appendSeq.filter((group) => match(group.name)),
-    [appendSeq, match]
+    [appendSeq, match],
   );
 
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
-    })
+    }),
   );
   const reorder = (
     list: IProxyGroupConfig[],
     startIndex: number,
-    endIndex: number
+    endIndex: number,
   ) => {
     const result = Array.from(list);
     const [removed] = result.splice(startIndex, 1);
@@ -188,18 +192,18 @@ export const GroupsEditorViewer = (props: Props) => {
           setCurrData(
             yaml.dump(
               { prepend: prependSeq, append: appendSeq, delete: deleteSeq },
-              { forceQuotes: true }
-            )
+              { forceQuotes: true },
+            ),
           );
         } catch (e) {
           // 防止异常导致UI卡死
         }
       };
-      if (window.requestIdleCallback) {
-        window.requestIdleCallback(serialize);
-      } else {
-        setTimeout(serialize, 0);
-      }
+
+      const handle = requestIdleCallback(serialize);
+      return () => {
+        cancelIdleCallback(handle);
+      };
     }
   }, [prependSeq, appendSeq, deleteSeq]);
 
@@ -226,7 +230,7 @@ export const GroupsEditorViewer = (props: Props) => {
           return !moreDeleteProxies.includes(proxy);
         }
       }),
-      moreAppendProxies
+      moreAppendProxies,
     );
 
     setProxyPolicyList(
@@ -236,8 +240,8 @@ export const GroupsEditorViewer = (props: Props) => {
           .map((group: IProxyGroupConfig) => group.name)
           .filter((name) => !deleteSeq.includes(name)) || [],
         appendSeq.map((group: IProxyGroupConfig) => group.name),
-        proxies.map((proxy: any) => proxy.name)
-      )
+        proxies.map((proxy: any) => proxy.name),
+      ),
     );
   };
   const fetchProfile = async () => {
@@ -266,7 +270,7 @@ export const GroupsEditorViewer = (props: Props) => {
       {},
       originProvider,
       moreProvider,
-      globalProvider
+      globalProvider,
     );
 
     setProxyProviderList(Object.keys(provider));
@@ -297,11 +301,11 @@ export const GroupsEditorViewer = (props: Props) => {
   const handleSave = useLockFn(async () => {
     try {
       await saveProfileFile(property, currData);
-      showNotice('success', t("Saved Successfully"));
+      showNotice("success", t("Saved Successfully"));
       onSave?.(prevData, currData);
       onClose();
     } catch (err: any) {
-      showNotice('error', err.toString());
+      showNotice("error", err.toString());
     }
   });
 
@@ -502,7 +506,7 @@ export const GroupsEditorViewer = (props: Props) => {
                                 {t("seconds")}
                               </InputAdornment>
                             ),
-                          }
+                          },
                         }}
                       />
                     </Item>
@@ -530,7 +534,7 @@ export const GroupsEditorViewer = (props: Props) => {
                                 {t("millis")}
                               </InputAdornment>
                             ),
-                          }
+                          },
                         }}
                       />
                     </Item>
@@ -742,7 +746,7 @@ export const GroupsEditorViewer = (props: Props) => {
                       }
                       setPrependSeq([formIns.getValues(), ...prependSeq]);
                     } catch (err: any) {
-                      showNotice('error', err.message || err.toString());
+                      showNotice("error", err.message || err.toString());
                     }
                   }}
                 >
@@ -764,7 +768,7 @@ export const GroupsEditorViewer = (props: Props) => {
                       }
                       setAppendSeq([...appendSeq, formIns.getValues()]);
                     } catch (err: any) {
-                      showNotice('error', err.message || err.toString());
+                      showNotice("error", err.message || err.toString());
                     }
                   }}
                 >
@@ -811,8 +815,8 @@ export const GroupsEditorViewer = (props: Props) => {
                                 onDelete={() => {
                                   setPrependSeq(
                                     prependSeq.filter(
-                                      (v) => v.name !== item.name
-                                    )
+                                      (v) => v.name !== item.name,
+                                    ),
                                   );
                                 }}
                               />
@@ -838,8 +842,8 @@ export const GroupsEditorViewer = (props: Props) => {
                           ) {
                             setDeleteSeq(
                               deleteSeq.filter(
-                                (v) => v !== filteredGroupList[newIndex].name
-                              )
+                                (v) => v !== filteredGroupList[newIndex].name,
+                              ),
                             );
                           } else {
                             setDeleteSeq((prev) => [
@@ -871,8 +875,8 @@ export const GroupsEditorViewer = (props: Props) => {
                                 onDelete={() => {
                                   setAppendSeq(
                                     appendSeq.filter(
-                                      (v) => v.name !== item.name
-                                    )
+                                      (v) => v.name !== item.name,
+                                    ),
                                   );
                                 }}
                               />
@@ -906,8 +910,9 @@ export const GroupsEditorViewer = (props: Props) => {
               padding: {
                 top: 33, // 顶部padding防止遮挡snippets
               },
-              fontFamily: `Fira Code, JetBrains Mono, Roboto Mono, "Source Code Pro", Consolas, Menlo, Monaco, monospace, "Courier New", "Apple Color Emoji"${getSystem() === "windows" ? ", twemoji mozilla" : ""
-                }`,
+              fontFamily: `Fira Code, JetBrains Mono, Roboto Mono, "Source Code Pro", Consolas, Menlo, Monaco, monospace, "Courier New", "Apple Color Emoji"${
+                getSystem() === "windows" ? ", twemoji mozilla" : ""
+              }`,
               fontLigatures: false, // 连字符
               smoothScrolling: true, // 平滑滚动
             }}

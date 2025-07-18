@@ -59,7 +59,13 @@ const DEFAULT_DNS_CONFIG = {
     "*.msftncsi.com",
     "www.msftconnecttest.com",
   ],
-  "default-nameserver": ["system", "223.6.6.6", "8.8.8.8", "2400:3200::1", "2001:4860:4860::8888"],
+  "default-nameserver": [
+    "system",
+    "223.6.6.6",
+    "8.8.8.8",
+    "2400:3200::1",
+    "2001:4860:4860::8888",
+  ],
   nameserver: [
     "8.8.8.8",
     "https://doh.pub/dns-query",
@@ -70,7 +76,7 @@ const DEFAULT_DNS_CONFIG = {
   "proxy-server-nameserver": [
     "https://doh.pub/dns-query",
     "https://dns.alidns.com/dns-query",
-    "tls://223.5.5.5"
+    "tls://223.5.5.5",
   ],
   "direct-nameserver": [],
   "direct-nameserver-follow-policy": false,
@@ -219,8 +225,7 @@ export const DnsViewer = forwardRef<DialogRef>((props, ref) => {
         dnsConfig["respect-rules"] ?? DEFAULT_DNS_CONFIG["respect-rules"],
       useHosts: dnsConfig["use-hosts"] ?? DEFAULT_DNS_CONFIG["use-hosts"],
       useSystemHosts:
-        dnsConfig["use-system-hosts"] ??
-        DEFAULT_DNS_CONFIG["use-system-hosts"],
+        dnsConfig["use-system-hosts"] ?? DEFAULT_DNS_CONFIG["use-system-hosts"],
       ipv6: dnsConfig.ipv6 ?? DEFAULT_DNS_CONFIG.ipv6,
       fakeIpFilter:
         dnsConfig["fake-ip-filter"]?.join(", ") ??
@@ -229,7 +234,8 @@ export const DnsViewer = forwardRef<DialogRef>((props, ref) => {
         dnsConfig.nameserver?.join(", ") ??
         DEFAULT_DNS_CONFIG.nameserver.join(", "),
       fallback:
-        dnsConfig.fallback?.join(", ") ?? DEFAULT_DNS_CONFIG.fallback.join(", "),
+        dnsConfig.fallback?.join(", ") ??
+        DEFAULT_DNS_CONFIG.fallback.join(", "),
       defaultNameserver:
         dnsConfig["default-nameserver"]?.join(", ") ??
         DEFAULT_DNS_CONFIG["default-nameserver"].join(", "),
@@ -299,9 +305,8 @@ export const DnsViewer = forwardRef<DialogRef>((props, ref) => {
 
   // 从表单值更新YAML内容
   const updateYamlFromValues = () => {
-
     const config: Record<string, any> = {};
-    
+
     const dnsConfig = generateDnsConfig();
     if (Object.keys(dnsConfig).length > 0) {
       config.dns = dnsConfig;
@@ -311,7 +316,7 @@ export const DnsViewer = forwardRef<DialogRef>((props, ref) => {
     if (Object.keys(hosts).length > 0) {
       config.hosts = hosts;
     }
-    
+
     setYamlContent(yaml.dump(config, { forceQuotes: true }));
   };
 
@@ -320,31 +325,11 @@ export const DnsViewer = forwardRef<DialogRef>((props, ref) => {
     try {
       const parsedYaml = yaml.load(yamlContent) as any;
       if (!parsedYaml) return;
-      
+
       updateValuesFromConfig(parsedYaml);
     } catch (err: any) {
-      showNotice('error', t("Invalid YAML format"));
+      showNotice("error", t("Invalid YAML format"));
     }
-  };
-
-  // 格式化nameserver-policy为字符串
-  const formatNameserverPolicy = (policy: any): string => {
-    if (!policy) return "";
-
-    let result: string[] = [];
-
-    Object.entries(policy).forEach(([domain, servers]) => {
-      if (Array.isArray(servers)) {
-        // 处理数组格式的服务器
-        const serversStr = servers.join(";");
-        result.push(`${domain}=${serversStr}`);
-      } else {
-        // 处理单个服务器
-        result.push(`${domain}=${servers}`);
-      }
-    });
-
-    return result.join(", ");
   };
 
   // 解析nameserver-policy为对象
@@ -352,27 +337,44 @@ export const DnsViewer = forwardRef<DialogRef>((props, ref) => {
     const result: Record<string, any> = {};
     if (!str) return result;
 
-    str.split(",").forEach((item) => {
-      const parts = item.trim().split("=");
-      if (parts.length < 2) return;
+    // 处理geosite:xxx,yyy格式
+    const ruleRegex = /\s*([^=]+?)\s*=\s*([^,]+)(?:,|$)/g;
+    let match;
 
-      const domain = parts[0].trim();
-      const serversStr = parts.slice(1).join("=").trim();
+    while ((match = ruleRegex.exec(str)) !== null) {
+      const [, domainsPart, serversPart] = match;
 
-      // 检查是否包含多个分号分隔的服务器
-      if (serversStr.includes(";")) {
-        // 多个服务器，作为数组处理
-        result[domain] = serversStr
-          .split(";")
-          .map((s) => s.trim())
-          .filter(Boolean);
+      // 处理域名部分
+      let domains;
+      if (domainsPart.startsWith("geosite:")) {
+        domains = [domainsPart.trim()];
       } else {
-        // 单个服务器
-        result[domain] = serversStr;
+        domains = [domainsPart.trim()];
       }
-    });
+
+      // 处理服务器部分
+      const servers = serversPart.split(";").map((s) => s.trim());
+
+      // 为每个域名组分配相同的服务器列表
+      domains.forEach((domain) => {
+        result[domain] = servers;
+      });
+    }
 
     return result;
+  };
+
+  // 格式化nameserver-policy为字符串
+  const formatNameserverPolicy = (policy: any): string => {
+    if (!policy || typeof policy !== "object") return "";
+
+    // 直接将对象转换为字符串格式
+    return Object.entries(policy)
+      .map(([domain, servers]) => {
+        const serversStr = Array.isArray(servers) ? servers.join(";") : servers;
+        return `${domain}=${serversStr}`;
+      })
+      .join(", ");
   };
 
   // 格式化hosts为字符串
@@ -437,7 +439,7 @@ export const DnsViewer = forwardRef<DialogRef>((props, ref) => {
 
   // 解析列表字符串为数组
   const parseList = (str: string): string[] => {
-    if (!str) return [];
+    if (!str?.trim()) return [];
     return str
       .split(",")
       .map((item) => item.trim())
@@ -467,26 +469,15 @@ export const DnsViewer = forwardRef<DialogRef>((props, ref) => {
         ipcidr: parseList(values.fallbackIpcidr),
         domain: parseList(values.fallbackDomain),
       },
-    };
 
-    // 只在有值时添加其他可选字段
-    if (values.fallback) {
-      dnsConfig["fallback"] = parseList(values.fallback);
-    }
+      fallback: parseList(values.fallback),
+      "proxy-server-nameserver": parseList(values.proxyServerNameserver),
+      "direct-nameserver": parseList(values.directNameserver),
+    };
 
     const policy = parseNameserverPolicy(values.nameserverPolicy);
     if (Object.keys(policy).length > 0) {
       dnsConfig["nameserver-policy"] = policy;
-    }
-
-    if (values.proxyServerNameserver) {
-      dnsConfig["proxy-server-nameserver"] = parseList(
-        values.proxyServerNameserver,
-      );
-    }
-
-    if (values.directNameserver) {
-      dnsConfig["direct-nameserver"] = parseList(values.directNameserver);
     }
 
     return dnsConfig;
@@ -505,7 +496,7 @@ export const DnsViewer = forwardRef<DialogRef>((props, ref) => {
         if (Object.keys(dnsConfig).length > 0) {
           config.dns = dnsConfig;
         }
-        
+
         const hosts = parseHosts(values.hosts);
         if (Object.keys(hosts).length > 0) {
           config.hosts = hosts;
@@ -521,30 +512,41 @@ export const DnsViewer = forwardRef<DialogRef>((props, ref) => {
 
       // 保存配置
       await invoke("save_dns_config", { dnsConfig: config });
-      
+
       // 验证配置
-      const [isValid, errorMsg] = await invoke<[boolean, string]>("validate_dns_config", {});
-      
+      const [isValid, errorMsg] = await invoke<[boolean, string]>(
+        "validate_dns_config",
+        {},
+      );
+
       if (!isValid) {
         let cleanErrorMsg = errorMsg;
-        
+
         // 提取关键错误信息
         if (errorMsg.includes("level=error")) {
-          const errorLines = errorMsg.split('\n').filter(line => 
-            line.includes("level=error") || 
-            line.includes("level=fatal") || 
-            line.includes("failed")
-          );
-          
+          const errorLines = errorMsg
+            .split("\n")
+            .filter(
+              (line) =>
+                line.includes("level=error") ||
+                line.includes("level=fatal") ||
+                line.includes("failed"),
+            );
+
           if (errorLines.length > 0) {
-            cleanErrorMsg = errorLines.map(line => {
-              const msgMatch = line.match(/msg="([^"]+)"/);
-              return msgMatch ? msgMatch[1] : line;
-            }).join(", ");
+            cleanErrorMsg = errorLines
+              .map((line) => {
+                const msgMatch = line.match(/msg="([^"]+)"/);
+                return msgMatch ? msgMatch[1] : line;
+              })
+              .join(", ");
           }
         }
-        
-        showNotice('error', t("DNS configuration error") + ": " + cleanErrorMsg);
+
+        showNotice(
+          "error",
+          t("DNS configuration error") + ": " + cleanErrorMsg,
+        );
         return;
       }
 
@@ -555,9 +557,9 @@ export const DnsViewer = forwardRef<DialogRef>((props, ref) => {
       }
 
       setOpen(false);
-      showNotice('success', t("DNS settings saved"));
+      showNotice("success", t("DNS settings saved"));
     } catch (err: any) {
-      showNotice('error', err.message || err.toString());
+      showNotice("error", err.message || err.toString());
     }
   });
 

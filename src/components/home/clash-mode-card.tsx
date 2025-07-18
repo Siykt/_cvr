@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Box, Typography, Paper, Stack, Fade } from "@mui/material";
+import { Box, Typography, Paper, Stack } from "@mui/material";
 import { useLockFn } from "ahooks";
 import { closeAllConnections } from "@/services/api";
 import { patchClashMode } from "@/services/cmds";
@@ -23,12 +23,24 @@ export const ClashModeCard = () => {
   // 直接使用API返回的模式，不维护本地状态
   const currentMode = clashConfig?.mode?.toLowerCase();
 
+  const modeDescription = useMemo(() => {
+    if (typeof currentMode === "string" && currentMode.length > 0) {
+      return t(
+        `${currentMode[0].toLocaleUpperCase()}${currentMode.slice(1)} Mode Description`,
+      );
+    }
+    return t("Mode Description Not Available");
+  }, [currentMode]);
+
   // 模式图标映射
-  const modeIcons = useMemo(() => ({
-    rule: <MultipleStopRounded fontSize="small" />,
-    global: <LanguageRounded fontSize="small" />,
-    direct: <DirectionsRounded fontSize="small" />
-  }), []);
+  const modeIcons = useMemo(
+    () => ({
+      rule: <MultipleStopRounded fontSize="small" />,
+      global: <LanguageRounded fontSize="small" />,
+      direct: <DirectionsRounded fontSize="small" />,
+    }),
+    [],
+  );
 
   // 切换模式的处理函数
   const onChangeMode = useLockFn(async (mode: string) => {
@@ -68,18 +80,19 @@ export const ClashModeCard = () => {
     "&:active": {
       transform: "translateY(1px)",
     },
-    "&::after": mode === currentMode
-      ? {
-        content: '""',
-        position: "absolute",
-        bottom: -16,
-        left: "50%",
-        width: 2,
-        height: 16,
-        bgcolor: "primary.main",
-        transform: "translateX(-50%)",
-      }
-      : {},
+    "&::after":
+      mode === currentMode
+        ? {
+            content: '""',
+            position: "absolute",
+            bottom: -16,
+            left: "50%",
+            width: 2,
+            height: 16,
+            bgcolor: "primary.main",
+            transform: "translateX(-50%)",
+          }
+        : {},
   });
 
   // 描述样式
@@ -143,12 +156,8 @@ export const ClashModeCard = () => {
           overflow: "visible",
         }}
       >
-        <Typography
-          variant="caption"
-          component="div"
-          sx={descriptionStyles}
-        >
-          {t(`${currentMode?.charAt(0).toUpperCase()}${currentMode?.slice(1)} Mode Description`)}
+        <Typography variant="caption" component="div" sx={descriptionStyles}>
+          {modeDescription}
         </Typography>
       </Box>
     </Box>

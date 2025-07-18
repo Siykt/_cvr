@@ -578,8 +578,8 @@ function URI_VLESS(line: string): IProxyVlessConfig {
     proxy.network = "ws";
     httpupgrade = true;
   } else {
-    proxy.network = ["tcp", "ws", "http", "grpc", "h2"].includes(params.type) 
-      ? (params.type as NetworkType) 
+    proxy.network = ["tcp", "ws", "http", "grpc", "h2"].includes(params.type)
+      ? (params.type as NetworkType)
       : "tcp";
   }
   if (!proxy.network && isShadowrocket && params.obfs) {
@@ -730,7 +730,7 @@ function URI_Trojan(line: string): IProxyTrojanConfig {
 
 function URI_Hysteria2(line: string): IProxyHysteria2Config {
   line = line.split(/(hysteria2|hy2):\/\//)[2];
-  // eslint-disable-next-line no-unused-vars
+
   let [__, password, server, ___, port, ____, addons = "", name] =
     /^(.*?)@(.*?)(:(\d+))?\/?(\?(.*?))?(?:#(.*?))?$/.exec(line) || [];
   let portNum = parseInt(`${port}`, 10);
