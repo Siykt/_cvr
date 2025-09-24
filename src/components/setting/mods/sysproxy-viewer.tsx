@@ -1,19 +1,3 @@
-import { BaseDialog, DialogRef, Switch } from "@/components/base";
-import { BaseFieldset } from "@/components/base/base-fieldset";
-import { TooltipIcon } from "@/components/base/base-tooltip-icon";
-import { EditorViewer } from "@/components/profile/editor-viewer";
-import { useVerge } from "@/hooks/use-verge";
-import { useAppData } from "@/providers/app-data-provider";
-import { getClashConfig } from "@/services/api";
-import {
-  getAutotemProxy,
-  getNetworkInterfacesInfo,
-  getSystemHostname,
-  getSystemProxy,
-  patchVergeConfig,
-} from "@/services/cmds";
-import { showNotice } from "@/services/noticeService";
-import getSystem from "@/utils/get-system";
 import { EditRounded } from "@mui/icons-material";
 import {
   Autocomplete,
@@ -36,6 +20,23 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import useSWR, { mutate } from "swr";
+
+import { BaseDialog, DialogRef, Switch } from "@/components/base";
+import { BaseFieldset } from "@/components/base/base-fieldset";
+import { TooltipIcon } from "@/components/base/base-tooltip-icon";
+import { EditorViewer } from "@/components/profile/editor-viewer";
+import { useVerge } from "@/hooks/use-verge";
+import { useAppData } from "@/providers/app-data-provider";
+import { getClashConfig } from "@/services/cmds";
+import {
+  getAutotemProxy,
+  getNetworkInterfacesInfo,
+  getSystemHostname,
+  getSystemProxy,
+  patchVergeConfig,
+} from "@/services/cmds";
+import { showNotice } from "@/services/noticeService";
+import getSystem from "@/utils/get-system";
 
 const DEFAULT_PAC = `function FindProxyForURL(url, host) {
   return "PROXY %proxy_host%:%mixed-port%; SOCKS5 %proxy_host%:%mixed-port%; DIRECT;";
@@ -122,16 +123,12 @@ export const SysproxyViewer = forwardRef<DialogRef>((props, ref) => {
     return "127.0.0.1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,172.29.0.0/16,localhost,*.local,*.crashlytics.com,<local>";
   };
 
-  const { data: clashConfig, mutate: mutateClash } = useSWR(
-    "getClashConfig",
-    getClashConfig,
-    {
-      revalidateOnFocus: false,
-      revalidateIfStale: true,
-      dedupingInterval: 1000,
-      errorRetryInterval: 5000,
-    },
-  );
+  const { data: clashConfig } = useSWR("getClashConfig", getClashConfig, {
+    revalidateOnFocus: false,
+    revalidateIfStale: true,
+    dedupingInterval: 1000,
+    errorRetryInterval: 5000,
+  });
 
   const [prevMixedPort, setPrevMixedPort] = useState(
     clashConfig?.["mixed-port"],
@@ -299,7 +296,7 @@ export const SysproxyViewer = forwardRef<DialogRef>((props, ref) => {
     const ipv6Regex =
       /^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$/;
     const hostnameRegex =
-      /^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$/;
+      /^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9-]*[A-Za-z0-9])$/;
 
     if (
       !ipv4Regex.test(value.proxy_host) &&

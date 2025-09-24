@@ -1,14 +1,4 @@
 import {
-  forwardRef,
-  useEffect,
-  useImperativeHandle,
-  useRef,
-  useState,
-} from "react";
-import { useLockFn } from "ahooks";
-import { useTranslation } from "react-i18next";
-import { useForm, Controller } from "react-hook-form";
-import {
   Box,
   FormControl,
   InputAdornment,
@@ -18,12 +8,24 @@ import {
   styled,
   TextField,
 } from "@mui/material";
-import { createProfile, patchProfile } from "@/services/cmds";
+import { useLockFn } from "ahooks";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
+import { useForm, Controller } from "react-hook-form";
+import { useTranslation } from "react-i18next";
+
 import { BaseDialog, Switch } from "@/components/base";
-import { version } from "@root/package.json";
-import { FileInput } from "./file-input";
 import { useProfiles } from "@/hooks/use-profiles";
+import { createProfile, patchProfile } from "@/services/cmds";
 import { showNotice } from "@/services/noticeService";
+import { version } from "@root/package.json";
+
+import { FileInput } from "./file-input";
 
 interface Props {
   onChange: (isActivating?: boolean) => void;
@@ -47,7 +49,12 @@ export const ProfileViewer = forwardRef<ProfileViewerRef, Props>(
     // file input
     const fileDataRef = useRef<string | null>(null);
 
-    const { control, watch, register, ...formIns } = useForm<IProfileItem>({
+    const {
+      control,
+      watch,
+      register: _register,
+      ...formIns
+    } = useForm<IProfileItem>({
       defaultValues: {
         type: "remote",
         name: "",
@@ -144,7 +151,7 @@ export const ProfileViewer = forwardRef<ProfileViewerRef, Props>(
                 if (!form.uid) throw new Error("UID not found");
                 await patchProfile(form.uid, item);
               }
-            } catch (err) {
+            } catch {
               // 首次创建/更新失败，尝试使用自身代理
               showNotice(
                 "info",
@@ -201,7 +208,9 @@ export const ProfileViewer = forwardRef<ProfileViewerRef, Props>(
         setOpen(false);
         fileDataRef.current = null;
         setTimeout(() => formIns.reset(), 500);
-      } catch {}
+      } catch (e) {
+        console.warn("[ProfileViewer] handleClose error:", e);
+      }
     };
 
     const text = {
